@@ -169,7 +169,7 @@ This project uses MIMIC-IV, a de-identified clinical database maintained by MIT 
 **Shubham Rajiwade**
 - Graduating December 2026 · Northeastern University
 - Targeting Data Analyst / BI Analyst / Analytics Engineer roles
-- [LinkedIn](https://www.linkedin.com/in/shubham-rajiwade-8106842a7/) · [Tableau Public](https://public.tableau.com/app/profile/shubham.rajiwade/viz/HospitalReadmissionRiskAnalysis-MIMIC-IV/Dashboard1) · [GitHub](https://github.com/shubhamrajiwade29)
+- [LinkedIn](https://www.linkedin.com/in/shubham-rajiwade-8106842a7/) · [Tableau Public](https://public.tableau.com/app/profile/shubham.rajiwade/vizzes) · [GitHub](https://github.com/shubhamrajiwade29)
 
 ---
 
