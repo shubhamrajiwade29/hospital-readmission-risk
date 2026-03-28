@@ -1,0 +1,4 @@
+mimic-iv-clinical-database-demo-2.2/
+__pycache__/
+*.pyc
+.env

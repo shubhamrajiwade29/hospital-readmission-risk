@@ -1,0 +1,213 @@
+-- ============================================================
+-- HOSPITAL READMISSION RISK ANALYSIS
+-- Script: dashboard_queries.sql
+-- Purpose: Core SQL queries powering the Tableau dashboard
+-- Author: Shubham Rajiwade | Portfolio Project | 2025
+-- ============================================================
+
+USE readmission_risk;
+
+-- ============================================================
+-- QUERY 1: KPI SUMMARY
+-- Powers: 4 KPI cards at top of dashboard
+-- ============================================================
+SELECT
+    COUNT(a.hadm_id)                                AS total_admissions,
+    COUNT(DISTINCT a.subject_id)                    AS total_patients,
+    ROUND(AVG(a.los_days), 1)                       AS avg_los_days,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(a.hadm_id), 1)                    AS readmission_rate_pct,
+    SUM(a.readmitted_30d)                           AS total_readmissions,
+    SUM(a.hospital_expire_flag)                     AS in_hospital_deaths,
+    COUNT(CASE WHEN r.risk_tier = 'High'
+               THEN 1 END)                          AS high_risk_count,
+    COUNT(CASE WHEN r.risk_tier = 'Medium'
+               THEN 1 END)                          AS medium_risk_count,
+    COUNT(CASE WHEN r.risk_tier = 'Low'
+               THEN 1 END)                          AS low_risk_count,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_risk_score
+FROM admissions a
+JOIN patient_risk_scores r ON a.hadm_id = r.hadm_id;
+
+
+-- ============================================================
+-- QUERY 2: READMISSION RATE BY PRIMARY DIAGNOSIS
+-- Powers: Bar chart — "Readmission rate by diagnosis"
+-- seq_num = 1 means primary diagnosis only
+-- ============================================================
+SELECT
+    d.icd_code,
+    d.icd_version,
+    COUNT(DISTINCT d.hadm_id)                       AS admission_count,
+    SUM(a.readmitted_30d)                           AS readmitted_count,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(d.hadm_id), 1)                    AS readmission_rate_pct,
+    ROUND(AVG(a.los_days), 1)                       AS avg_los,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_risk_score
+FROM diagnoses_icd d
+JOIN admissions a          ON d.hadm_id    = a.hadm_id
+JOIN patient_risk_scores r ON d.hadm_id    = r.hadm_id
+WHERE d.seq_num = 1
+GROUP BY d.icd_code, d.icd_version
+HAVING COUNT(DISTINCT d.hadm_id) >= 2          -- filter out single-admission codes
+ORDER BY readmission_rate_pct DESC
+LIMIT 20;
+
+
+-- ============================================================
+-- QUERY 3: RISK TIER DISTRIBUTION
+-- Powers: Risk tier breakdown chart + donut chart
+-- ============================================================
+SELECT
+    r.risk_tier,
+    COUNT(*)                                        AS admission_count,
+    ROUND(COUNT(*) * 100.0
+          / SUM(COUNT(*)) OVER(), 1)               AS pct_of_total,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_score,
+    ROUND(AVG(a.los_days), 1)                       AS avg_los,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(*), 1)                            AS readmission_rate_pct,
+    ROUND(AVG(p.anchor_age), 1)                     AS avg_age
+FROM patient_risk_scores r
+JOIN admissions a  ON r.hadm_id    = a.hadm_id
+JOIN patients p    ON r.subject_id = p.subject_id
+GROUP BY r.risk_tier
+ORDER BY FIELD(r.risk_tier, 'High', 'Medium', 'Low');
+
+
+-- ============================================================
+-- QUERY 4: READMISSION RATE BY INSURANCE TYPE
+-- Powers: Insurance breakdown bar chart
+-- ============================================================
+SELECT
+    COALESCE(a.insurance, 'Unknown')                AS insurance_type,
+    COUNT(*)                                        AS admission_count,
+    SUM(a.readmitted_30d)                           AS readmitted_count,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(*), 1)                            AS readmission_rate_pct,
+    ROUND(AVG(a.los_days), 1)                       AS avg_los,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_risk_score,
+    ROUND(AVG(p.anchor_age), 1)                     AS avg_age
+FROM admissions a
+JOIN patient_risk_scores r ON a.hadm_id    = r.hadm_id
+JOIN patients p            ON a.subject_id = p.subject_id
+GROUP BY a.insurance
+ORDER BY readmission_rate_pct DESC;
+
+
+-- ============================================================
+-- QUERY 5: PATIENT RISK TABLE
+-- Powers: Operational patient table (Tab 2 of dashboard)
+-- ============================================================
+SELECT
+    a.hadm_id,
+    a.subject_id,
+    p.anchor_age                                    AS age,
+    p.gender,
+    a.admission_type,
+    a.insurance,
+    a.admittime,
+    a.dischtime,
+    ROUND(a.los_days, 1)                            AS los_days,
+    a.discharge_location,
+    a.readmitted_30d,
+    a.days_to_readmit,
+    a.hospital_expire_flag,
+    r.total_risk_score,
+    r.risk_tier,
+    r.age_score,
+    r.los_score,
+    r.comorbidity_score,
+    r.icu_score,
+    r.polypharmacy_score,
+    r.abnormal_labs_score,
+    -- comorbidity count
+    (SELECT COUNT(DISTINCT icd_code)
+     FROM diagnoses_icd d
+     WHERE d.hadm_id = a.hadm_id)                  AS comorbidity_count,
+    -- drug count
+    (SELECT COUNT(DISTINCT drug)
+     FROM prescriptions rx
+     WHERE rx.hadm_id = a.hadm_id
+     AND rx.drug IS NOT NULL)                       AS drug_count,
+    -- ICU flag
+    (SELECT COUNT(*)
+     FROM icustays i
+     WHERE i.hadm_id = a.hadm_id)                  AS icu_stays
+FROM admissions a
+JOIN patients p            ON a.subject_id = p.subject_id
+JOIN patient_risk_scores r ON a.hadm_id    = r.hadm_id
+ORDER BY r.total_risk_score DESC;
+
+
+-- ============================================================
+-- QUERY 6: RISK FACTOR BREAKDOWN
+-- Powers: Tab 3 — analytical deep dive charts
+-- ============================================================
+
+-- 6A: Readmission rate by age group
+SELECT
+    CASE
+        WHEN p.anchor_age < 40  THEN 'Under 40'
+        WHEN p.anchor_age < 50  THEN '40-49'
+        WHEN p.anchor_age < 60  THEN '50-59'
+        WHEN p.anchor_age < 70  THEN '60-69'
+        WHEN p.anchor_age < 80  THEN '70-79'
+        ELSE '80+'
+    END                                             AS age_group,
+    COUNT(*)                                        AS admission_count,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(*), 1)                            AS readmission_rate_pct,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_risk_score
+FROM admissions a
+JOIN patients p            ON a.subject_id = p.subject_id
+JOIN patient_risk_scores r ON a.hadm_id    = r.hadm_id
+GROUP BY age_group
+ORDER BY MIN(p.anchor_age);
+
+-- 6B: Readmission rate by LOS bucket
+SELECT
+    CASE
+        WHEN a.los_days < 3   THEN '0-2 days'
+        WHEN a.los_days < 7   THEN '3-6 days'
+        WHEN a.los_days < 14  THEN '7-13 days'
+        WHEN a.los_days < 30  THEN '14-29 days'
+        ELSE '30+ days'
+    END                                             AS los_bucket,
+    COUNT(*)                                        AS admission_count,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(*), 1)                            AS readmission_rate_pct,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_risk_score
+FROM admissions a
+JOIN patient_risk_scores r ON a.hadm_id = r.hadm_id
+GROUP BY los_bucket
+ORDER BY MIN(a.los_days);
+
+-- 6C: Readmission rate by discharge location
+SELECT
+    COALESCE(a.discharge_location, 'Unknown')       AS discharge_location,
+    COUNT(*)                                        AS admission_count,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(*), 1)                            AS readmission_rate_pct,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_risk_score
+FROM admissions a
+JOIN patient_risk_scores r ON a.hadm_id = r.hadm_id
+GROUP BY a.discharge_location
+ORDER BY readmission_rate_pct DESC;
+
+-- 6D: ICU vs non-ICU readmission comparison
+SELECT
+    CASE WHEN i.hadm_id IS NOT NULL
+         THEN 'ICU admission'
+         ELSE 'Non-ICU admission'
+    END                                             AS icu_flag,
+    COUNT(*)                                        AS admission_count,
+    ROUND(SUM(a.readmitted_30d) * 100.0
+          / COUNT(*), 1)                            AS readmission_rate_pct,
+    ROUND(AVG(a.los_days), 1)                       AS avg_los,
+    ROUND(AVG(r.total_risk_score), 1)               AS avg_risk_score
+FROM admissions a
+JOIN patient_risk_scores r  ON a.hadm_id = r.hadm_id
+LEFT JOIN (SELECT DISTINCT hadm_id FROM icustays) i
+                            ON a.hadm_id = i.hadm_id
+GROUP BY icu_flag;
