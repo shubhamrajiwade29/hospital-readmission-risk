@@ -45,6 +45,7 @@ hospital-readmission-risk/
 ├── compute_features.py       # Computes LOS, 30-day flags, risk scores
 ├── eda.py                    # Exploratory data analysis — 5 charts
 ├── dashboard_queries.sql     # SQL queries powering Tableau dashboard
+├── requirements.txt          # Python dependencies
 ├── eda_outputs/              # EDA chart outputs (PNG)
 │   ├── 1_demographics.png
 │   ├── 2_admissions.png
@@ -124,7 +125,7 @@ git clone https://github.com/shubhamrajiwade29/hospital-readmission-risk.git
 cd hospital-readmission-risk
 
 # Install dependencies
-pip3 install pandas mysql-connector-python matplotlib seaborn
+pip install -r requirements.txt
 
 # Create MySQL database
 # Run schema_design.sql in MySQL Workbench
